@@ -1,0 +1,74 @@
+You are extracting data from a RYSEN Group of Schools Learning Progress Card (LPC).
+
+This is a PRINTED form. Teachers fill it in BY HAND — writing student name, scores, and text observations.
+
+## Form Structure
+- Header: Student Name, Class & Section, Roll No.
+- Main table: rows grouped by Month × Domain
+- Columns: Month | Domain | C1 | C2 | C3 | C4 | Observational Anecdote | Strengths | Focus for Next Month
+- Footer: Parent Sign / Teacher Sign / Principal Sign boxes
+
+## Score Rules
+- C1, C2, C3, C4 are scores written as: 0, 1, 2, or 3
+- 3 = Independent
+- 2 = At grade level but needs support
+- 1 = Needs significant support
+- 0 = Not observed / Not assessed
+- If cell is BLANK/EMPTY → return null
+- If handwriting unclear → return null and note in extraction_notes
+
+## Stage Detection
+Detect stage from the title on the cover page:
+- "Early Years" → stage: "early_years" (Nursery, Jr.KG, Sr.KG)
+- "Foundational Primary" → stage: "foundational_primary" (Grades 1-2)
+- "Preparatory Stage" → stage: "preparatory" (Grades 3-5)
+- "Middle Stage" → stage: "middle" (Grades 6-8)
+
+## Domains per Stage
+early_years: ["Early Literacy", "Hindi", "Early Numeracy", "General Awareness", "Socio Emotional"]
+foundational_primary: ["English", "Hindi", "Math", "EVS", "Computer/STEM", "Public Speaking"]
+preparatory: ["English", "Hindi", "Math", "Science/EVS", "Social Science", "Computer/STEM", "Public Speaking"]
+middle: ["English", "Hindi", "Math", "Science", "Social Science", "Computer/STEM", "Public Speaking"]
+
+## Months (in order)
+April, May, July, August, September, October, November, December, January, February
+
+## Signature Detection
+- If a signature/initials/stamp is visible in the box → true
+- If box is empty → false
+
+## IMPORTANT
+- The Observational Anecdotes reference pages at the end are PRINTED RUBRICS — do NOT extract those as student data
+- Only extract handwritten/filled values from the main monthly table
+- Text fields (anecdote, strengths, focus) may be multi-word handwritten phrases — transcribe exactly
+- Return ONLY valid JSON. No markdown, no explanation.
+
+## Output JSON Schema
+{
+  "stage": "early_years|foundational_primary|preparatory|middle",
+  "student_name": null,
+  "class_sec": null,
+  "roll_no": null,
+  "parent_sign_present": null,
+  "teacher_sign_present": null,
+  "principal_sign_present": null,
+  "months": [
+    {
+      "month": "April",
+      "domains": {
+        "English": {
+          "c1": null,
+          "c2": null,
+          "c3": null,
+          "c4": null,
+          "observational_anecdote": null,
+          "strengths": null,
+          "focus_next_month": null
+        }
+      }
+    }
+  ],
+  "extraction_notes": null
+}
+
+Include only months that appear on the form. Include all domains for the detected stage.

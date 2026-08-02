@@ -1,0 +1,30 @@
+# Secrets — never commit these
+.env
+oauth_client.json
+oauth_token.json
+sheets_config.json
+
+# Python
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+dist/
+build/
+*.so
+
+# Output / temp
+output/
+*.xlsx
+*.pdf
+/tmp/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
