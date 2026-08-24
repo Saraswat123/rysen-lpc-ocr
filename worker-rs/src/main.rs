@@ -143,7 +143,8 @@ async fn main() -> anyhow::Result<()> {
     info!("PostgreSQL pool ready");
 
     let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(180))
+        .connect_timeout(std::time::Duration::from_secs(30))
+        .timeout(std::time::Duration::from_secs(600))
         .build()?;
 
     let sem = Arc::new(Semaphore::new(cfg.llm_concurrency));

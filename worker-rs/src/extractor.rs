@@ -1,6 +1,7 @@
 use anyhow::{Context, Result};
 use base64::{Engine, engine::general_purpose::STANDARD as B64};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use tokio::process::Command;
 
 use crate::db::LpcRow;
@@ -64,12 +65,12 @@ pub struct LpcExtraction {
 #[derive(Deserialize, Debug)]
 pub struct MonthData {
     pub month:   String,
-    pub domains: Vec<DomainData>,
+    // Model returns domains as object: { "Early Literacy": { c1, c2, ... }, ... }
+    pub domains: HashMap<String, DomainScores>,
 }
 
-#[derive(Deserialize, Debug)]
-pub struct DomainData {
-    pub name:                   String,
+#[derive(Deserialize, Debug, Default)]
+pub struct DomainScores {
     pub c1:                     Option<i32>,
     pub c2:                     Option<i32>,
     pub c3:                     Option<i32>,
@@ -160,18 +161,31 @@ pub async fn call_openrouter(
         messages: vec![OrMessage { role: "user", content }],
     };
 
-    let resp: OrResponse = client
+    let raw_resp = client
         .post("https://openrouter.ai/api/v1/chat/completions")
         .bearer_auth(api_key)
         .json(&body)
         .send()
         .await
-        .context("OpenRouter request failed")?
-        .error_for_status()
-        .context("OpenRouter returned error status")?
-        .json()
-        .await
-        .context("OpenRouter response parse failed")?;
+        .context("OpenRouter request failed")?;
+
+    let status = raw_resp.status();
+    // Use bytes() — more robust than text() for large or non-UTF8 responses
+    let body_bytes = raw_resp.bytes().await.context("OpenRouter body stream failed")?;
+    let body_text  = String::from_utf8_lossy(&body_bytes).into_owned();
+
+    tracing::debug!(status = %status, body_len = body_bytes.len(), "OpenRouter raw response");
+
+    if !status.is_success() {
+        anyhow::bail!("OpenRouter HTTP {status}: {}", &body_text[..body_text.len().min(400)]);
+    }
+
+    let resp: OrResponse = serde_json::from_str(&body_text)
+        .with_context(|| format!(
+            "OpenRouter JSON parse (HTTP {status}, {} bytes): {}",
+            body_bytes.len(),
+            &body_text[..body_text.len().min(600)]
+        ))?;
 
     let raw = resp.choices
         .into_iter()
@@ -230,7 +244,8 @@ pub fn extraction_to_rows(
 
     let mut rows = Vec::new();
     for m in ext.months {
-        for d in m.domains {
+        let month = m.month.clone();
+        for (domain_name, d) in m.domains {
             rows.push(LpcRow {
                 job_id,
                 branch:   branch.to_owned(),
@@ -238,8 +253,8 @@ pub fn extraction_to_rows(
                 student_name: student_name.clone(),
                 class_sec:    class_sec.clone(),
                 roll_no:      roll_no.clone(),
-                month:        m.month.clone(),
-                domain:       d.name,
+                month:        month.clone(),
+                domain:       domain_name,
                 c1: d.c1, c2: d.c2, c3: d.c3, c4: d.c4,
                 observational_anecdote: d.observational_anecdote,
                 strengths:              d.strengths,
