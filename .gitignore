@@ -4,6 +4,9 @@ oauth_client.json
 oauth_token.json
 sheets_config.json
 
+# Rust
+worker-rs/target/
+
 # Python
 venv/
 __pycache__/

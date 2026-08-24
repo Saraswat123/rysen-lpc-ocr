@@ -1,0 +1,49 @@
+[package]
+name = "rysen-worker"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "rysen-worker"
+path = "src/main.rs"
+
+[[bin]]
+name = "load-test"
+path = "src/bin/load_test.rs"
+
+[dependencies]
+# Async runtime
+tokio          = { version = "1",    features = ["full"] }
+tokio-util     = { version = "0.7" }
+
+# HTTP server + client
+axum           = { version = "0.7",  features = ["multipart"] }
+reqwest        = { version = "0.12", features = ["json", "multipart", "stream"] }
+
+# Database
+sqlx           = { version = "0.8",  features = ["postgres", "runtime-tokio", "uuid", "chrono"] }
+
+# Serialisation
+serde          = { version = "1",    features = ["derive"] }
+serde_json     = "1"
+
+# Tracing + OTel
+tracing                  = "0.1"
+tracing-subscriber       = { version = "0.3", features = ["env-filter", "fmt"] }
+opentelemetry            = { version = "0.26", features = ["trace"] }
+opentelemetry_sdk        = { version = "0.26", features = ["rt-tokio", "trace"] }
+opentelemetry-stdout     = { version = "0.26", features = ["trace"] }
+opentelemetry-semantic-conventions = { version = "0.26" }
+tracing-opentelemetry    = "0.27"
+
+# Utilities
+uuid        = { version = "1", features = ["v4", "serde"] }
+chrono      = { version = "0.4", features = ["serde"] }
+base64      = "0.22"
+dotenvy     = "0.15"
+anyhow      = "1"
+thiserror   = "1"
+tokio-retry = "0.3"
+
+[dev-dependencies]
+tokio-test = "0.4"
