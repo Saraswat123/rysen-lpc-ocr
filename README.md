@@ -2,17 +2,17 @@
 
 Automated extraction system for handwritten **Learning Progress Card (LPC)** forms across RYSEN Group of Schools — 15 branch locations in Rajasthan.
 
-Uploads a scanned PDF → AI vision model reads the handwriting → data saved to PostgreSQL → auto-pushed to branch-specific Google Sheet.
+Scanned PDF → AI vision model reads handwriting → PostgreSQL → Google Sheet per branch.
 
 ---
 
 ## What it does
 
-- **Upload** scanned LPC PDFs through a web dashboard (branch + student details)
-- **Extract** scores, observations, and signatures using an AI vision model (OpenRouter)
+- **Upload** scanned LPC PDFs via web dashboard (branch + student details)
+- **Extract** scores, observations, and signatures using OpenRouter vision model
 - **Store** all data permanently in PostgreSQL
-- **Auto-push** to the correct Google Sheet for each of 15 branch locations
-- **Scale** to 10,000+ PDFs/month via async Celery queue (4 parallel workers)
+- **Auto-push** to correct Google Sheet for each of 15 branch locations
+- **Scale** to 10,000+ PDFs/month via Rust async worker (4 tokio workers, bounded channel)
 
 ---
 
@@ -24,20 +24,34 @@ Uploads a scanned PDF → AI vision model reads the handwriting → data saved t
         ▼
 [FastAPI :8000]  →  creates UploadJob in PostgreSQL
         │
+        ├─── WORKER_BACKEND=rust (default) ──────────────────────────┐
+        │                                                             │
+        │    [Rust Worker :9000]                                      │
+        │    axum HTTP server                                         │
+        │    mpsc channel (cap 32) → backpressure 503                │
+        │    tokio workers ×4                                         │
+        │    Semaphore (max 5 concurrent LLM calls)                  │
+        │    Circuit breaker (5 fail → OPEN 30s, lock-free atomic)   │
+        │    OTel spans → stdout / OTLP                              │
+        │                                                             │
+        └─── WORKER_BACKEND=celery (fallback) ───────────────────────┤
+                                                                      │
+             [Redis :6379] ←→ [Celery Workers ×4]                    │
+                                                                      │
+        ┌─────────────────────────────────────────────────────────────┘
+        │
         ▼
-[Redis :6379]  ←→  [Celery Workers ×4]
-                          │
-                    ┌─────┴──────────────────┐
-                    │                        │
-              [OpenRouter Vision]     [pdf2image + Pillow]
-              nvidia/nemotron-nano    PDF → JPEG → base64
-                    │
-                    ▼
-              [PostgreSQL :5432]  ←  lpc_rows + upload_jobs
-                    │
-                    ▼
-        [Google Sheets — 1 sheet per branch]
-         Early Years | Foundational | Preparatory | Middle
+[pdftoppm]  PDF → JPEG pages (poppler, 150 DPI)
+        │
+        ▼
+[OpenRouter Vision API]  nvidia/nemotron-nano-12b-v2-vl:free
+  → structured JSON: stage, months, domains, scores (C1–C4)
+        │
+        ▼
+[PostgreSQL]  lpc_rows + upload_jobs (sqlx / SQLAlchemy)
+        │
+        ▼
+[Google Sheets]  1 sheet per branch × 4 stage tabs
 ```
 
 ---
@@ -51,7 +65,7 @@ Uploads a scanned PDF → AI vision model reads the handwriting → data saved t
 | Preparatory | Grade 3–5 | `preparatory` |
 | Middle | Grade 6–8 | `middle` |
 
-**Score scale (C1–C4):** `0` = Not observed · `1` = Needs significant support · `2` = At grade level, needs support · `3` = Independent
+**Score scale (C1–C4):** `0` Not observed · `1` Needs significant support · `2` At grade level, needs support · `3` Independent
 
 **10 academic months:** April · May · July · August · September · October · November · December · January · February
 
@@ -69,13 +83,15 @@ Beawar · Beawar NLC 1 · Beawar NLC 2 · Bikaner – Virat Nagar · Bikaner –
 |---|---|
 | Dashboard | Streamlit |
 | API | FastAPI + Uvicorn |
-| Queue | Celery 5 + Redis 7 |
+| Rust worker | axum · tokio · sqlx · reqwest |
+| Rust resilience | mpsc channel · Semaphore · CancellationToken · lock-free circuit breaker |
+| Observability | OpenTelemetry (tracing spans → stdout / OTLP) |
+| Python worker | Celery 5 + Redis 7 (fallback path) |
 | OCR | OpenRouter (`nvidia/nemotron-nano-12b-v2-vl:free`) |
-| PDF→Image | pdf2image + Pillow |
-| Data validation | Pydantic v2 |
-| Database | PostgreSQL 15 via SQLAlchemy |
+| PDF → Image | pdftoppm (poppler) |
+| Data validation | Pydantic v2 (Python) · serde (Rust) |
+| Database | PostgreSQL 15 via sqlx (Rust) / SQLAlchemy (Python) |
 | Sheets | gspread + Google OAuth2 |
-| Excel export | openpyxl |
 | Containers | Docker Compose (Postgres + Redis) |
 
 ---
@@ -83,38 +99,51 @@ Beawar · Beawar NLC 1 · Beawar NLC 2 · Bikaner – Virat Nagar · Bikaner –
 ## Project Structure
 
 ```
-ocr_extractor/
-├── dashboard.py                 # Streamlit upload UI
-├── main.py                      # Standalone CLI extractor (dev/test)
-├── setup_sheets.py              # One-time: creates 15 Google Sheets
+rysen-lpc-ocr/
+├── dashboard.py                  # Streamlit upload UI
+├── main.py                       # Standalone CLI extractor (dev/test)
+├── setup_sheets.py               # One-time: create 15 Google Sheets
 ├── requirements.txt
-├── docker-compose.yml           # PostgreSQL + Redis
-├── .env.example                 # Environment variable template
+├── docker-compose.yml            # PostgreSQL + Redis
+├── .env.example                  # Environment variable template
 │
 ├── api/
-│   ├── main.py                  # FastAPI app, startup, CORS
-│   ├── database.py              # SQLAlchemy engine + session
-│   ├── models.py                # UploadJob + LPCRow ORM models
+│   ├── main.py                   # FastAPI app, startup, CORS
+│   ├── database.py               # SQLAlchemy engine + session
+│   ├── models.py                 # UploadJob + LpcRow ORM models
 │   └── routes/
-│       └── upload.py            # POST /api/upload, GET /api/jobs
+│       └── upload.py             # POST /api/upload → Rust or Celery dispatch
 │
-├── worker/
-│   ├── celery_app.py            # Celery config, Redis broker
-│   └── tasks.py                 # extract_pdf_task (OCR → DB → Sheets)
+├── worker/                       # Python Celery worker (fallback)
+│   ├── celery_app.py
+│   └── tasks.py                  # extract_pdf_task (OCR → DB → Sheets)
 │
-├── extractor/
-│   ├── openrouter_extractor.py  # Active: OpenRouter vision model
-│   ├── gemini_extractor.py      # Future: Gemini 2.0 Flash
-│   ├── groq_extractor.py        # Fallback: Groq (no vision currently)
-│   ├── ollama_extractor.py      # Local offline fallback
-│   ├── sheets_writer.py         # Google Sheets push (branch routing)
-│   └── excel_writer.py          # RYSEN-branded Excel export
+├── worker-rs/                    # Rust async worker (production)
+│   ├── Cargo.toml
+│   ├── src/
+│   │   ├── main.rs               # axum server :9000  /submit  /health
+│   │   ├── worker.rs             # 4× tokio workers, mpsc channel (cap 32)
+│   │   ├── extractor.rs          # pdf→jpeg→openrouter→LpcExtraction
+│   │   ├── db.rs                 # sqlx: mark_processing/done/failed, insert_lpc_rows
+│   │   ├── circuit_breaker.rs    # AtomicU8 state, 5 fail → OPEN, 30s → HalfOpen
+│   │   ├── config.rs             # env var config
+│   │   └── telemetry.rs          # OTel spans stdout/OTLP
+│   └── src/bin/
+│       └── load_test.rs          # p50/p95/p99 latency binary
+│
+├── extractor/                    # Python OCR backends
+│   ├── openrouter_extractor.py   # active
+│   ├── gemini_extractor.py       # future (better accuracy)
+│   ├── groq_extractor.py
+│   ├── ollama_extractor.py       # local offline fallback
+│   ├── sheets_writer.py          # Google Sheets push, branch routing
+│   └── excel_writer.py
 │
 ├── models/
-│   └── lpc.py                   # Pydantic models: LPCRecord, MonthEntry, DomainEntry
+│   └── lpc.py                    # Pydantic: LpcExtraction, MonthData, DomainData
 │
 └── prompts/
-    └── lpc_prompt.txt           # AI extraction prompt (stage detection, domains, scoring)
+    └── lpc_prompt.txt            # Vision model prompt → strict JSON extraction
 ```
 
 ---
@@ -124,12 +153,13 @@ ocr_extractor/
 ### 1. Prerequisites
 
 ```bash
-brew install poppler          # required by pdf2image
+brew install poppler              # pdftoppm — PDF to JPEG conversion
+brew install rust                 # Rust toolchain (for Rust worker)
 ```
 
-Docker Desktop must be running.
+Docker Desktop must be running (Postgres + Redis).
 
-### 2. Clone and install
+### 2. Clone and install Python deps
 
 ```bash
 git clone https://github.com/Saraswat123/rysen-lpc-ocr.git
@@ -139,57 +169,82 @@ source venv/bin/activate
 pip install -r requirements.txt
 ```
 
-### 3. Environment
+### 3. Build Rust worker
+
+```bash
+cd worker-rs
+cargo build --release
+cd ..
+```
+
+### 4. Environment
 
 ```bash
 cp .env.example .env
 ```
 
-Edit `.env` and fill in:
+Edit `.env`:
 
 ```env
-MODEL_BACKEND=openrouter
+# OCR
 OPENROUTER_API_KEY=your_key_here        # https://openrouter.ai/keys
 OPENROUTER_MODEL=nvidia/nemotron-nano-12b-v2-vl:free
+
+# Worker backend: rust (production) or celery (fallback)
+WORKER_BACKEND=rust
+RUST_WORKER_URL=http://localhost:9000
+
+# Database — Docker default, or paste Neon/Supabase URL
+DATABASE_URL=postgresql://lpc_user:lpc_pass@localhost:5432/lpc_db
+
+# Google Sheets
 GOOGLE_OAUTH_CLIENT=/path/to/oauth_client.json
 ```
 
-### 4. Google OAuth credentials
+### 5. Google OAuth credentials
 
-1. Go to [console.cloud.google.com](https://console.cloud.google.com)
-2. Create a project → enable **Google Sheets API** + **Google Drive API**
-3. Create credentials → **OAuth 2.0 Desktop app** → download JSON
-4. Save as `oauth_client.json` (path must match `GOOGLE_OAUTH_CLIENT` in `.env`)
+1. [console.cloud.google.com](https://console.cloud.google.com) → create project
+2. Enable **Google Sheets API** + **Google Drive API**
+3. Credentials → **OAuth 2.0 Desktop app** → download JSON
+4. Save as `oauth_client.json`, set path in `.env`
 
-### 5. Start infrastructure
+### 6. Start infrastructure
 
 ```bash
-docker compose up -d
+docker compose up -d              # Postgres :5432 + Redis :6379
 ```
 
-### 6. Create Google Sheets (one-time)
+> **No Docker?** Use free cloud Postgres (Neon · Supabase · Railway). Set `DATABASE_URL` to the connection string and skip this step. Redis only needed for Celery path.
+
+### 7. Create Google Sheets (one-time)
 
 ```bash
 python setup_sheets.py
 ```
 
-This creates 15 sheets (one per branch), each with 4 stage tabs and headers. A browser window opens for Google login on first run. Saves `sheets_config.json` locally (not committed).
+Creates 15 sheets (one per branch), 4 stage tabs each. Browser opens for Google login. Saves `sheets_config.json` locally (gitignored).
 
-### 7. Start all services
+### 8. Start all services
 
-**Terminal 1 — FastAPI:**
+**Terminal 1 — Rust worker:**
+```bash
+cd worker-rs
+RUST_LOG=info ./target/release/rysen-worker
+```
+
+**Terminal 2 — FastAPI:**
 ```bash
 source venv/bin/activate
 uvicorn api.main:app --reload --port 8000
 ```
 
-**Terminal 2 — Celery workers:**
+**Terminal 3 — Celery (only if WORKER_BACKEND=celery):**
 ```bash
 source venv/bin/activate
 PYTHONPATH=$(pwd) celery -A worker.celery_app worker --loglevel=info --concurrency=4
 ```
 
-**Terminal 3 — Dashboard:**
+**Terminal 4 — Dashboard:**
 ```bash
 source venv/bin/activate
 streamlit run dashboard.py
@@ -201,12 +256,32 @@ Open [http://localhost:8501](http://localhost:8501)
 
 ## Usage
 
-1. **Select branch** from the dropdown (15 locations)
-2. **Enter student details** — Name, Class, Roll No., Section
-3. **Upload LPC PDF** (scanned form, any stage)
+1. Select **branch** (15 locations)
+2. Enter **student details** — Name, Class, Section, Roll No.
+3. Upload **LPC PDF** (scanned, any stage)
 4. Click **Upload & Extract**
-5. Watch live status — done in ~2 minutes per PDF
-6. Click the Google Sheet link to see extracted data
+5. Status updates live — ~3 min per PDF on free model
+6. Click the Google Sheet link to view extracted data
+
+---
+
+## Rust Worker Endpoints
+
+| Method | Path | Description |
+|---|---|---|
+| GET | `/health` | Status, circuit breaker state, failure count, queue capacity |
+| POST | `/submit` | Multipart: `job_id`, `branch`, `student_name`, `class_sec`, `roll_no`, `file` |
+
+Returns `503` with `{"error":"queue full"}` when channel at capacity. FastAPI surfaces this as a retryable error.
+
+### Load test
+
+```bash
+cd worker-rs
+cargo run --bin load-test -- --url http://localhost:9000 --jobs 50 --concurrency 10
+```
+
+Reports total / success / errors, throughput req/s, p50 / p95 / p99 latency.
 
 ---
 
@@ -219,7 +294,7 @@ Open [http://localhost:8501](http://localhost:8501)
 | id | UUID PK | job identifier |
 | branch | varchar | one of 15 branch names |
 | filename | varchar | original PDF name |
-| status | varchar | pending / processing / done / failed |
+| status | enum | pending / processing / done / failed |
 | error | text | error message if failed |
 | created_at | timestamp | |
 | completed_at | timestamp | null until done |
@@ -236,12 +311,12 @@ Open [http://localhost:8501](http://localhost:8501)
 | class_sec | varchar | |
 | roll_no | varchar | |
 | month | varchar | April … February |
-| domain | varchar | subject/skill area |
+| domain | varchar | subject / skill area |
 | c1 – c4 | int (0–3) | score per criteria, nullable |
 | observational_anecdote | text | |
 | strengths | text | |
 | focus_next_month | text | |
-| parent_sign | boolean | signature present? |
+| parent_sign | boolean | signature present |
 | teacher_sign | boolean | |
 | principal_sign | boolean | |
 | source_pdf | varchar | original filename |
@@ -249,55 +324,53 @@ Open [http://localhost:8501](http://localhost:8501)
 
 ---
 
-## API Endpoints
+## FastAPI Endpoints
 
 | Method | Path | Description |
 |---|---|---|
 | GET | `/health` | Health check |
 | POST | `/api/upload` | Upload PDF(s), returns job_id(s) |
-| GET | `/api/jobs/{job_id}` | Get job status + error |
-| GET | `/api/jobs?branch=X` | List recent jobs, filterable by branch |
+| GET | `/api/jobs/{job_id}` | Job status + error |
+| GET | `/api/jobs?branch=X` | List recent jobs, filter by branch |
 
 ---
 
-## Environment Variables Reference
+## Environment Variables
 
-| Variable | Required | Description |
-|---|---|---|
-| `MODEL_BACKEND` | Yes | `openrouter` / `gemini` / `ollama` |
-| `OPENROUTER_API_KEY` | If openrouter | Get from openrouter.ai/keys |
-| `OPENROUTER_MODEL` | No | Defaults to `nvidia/nemotron-nano-12b-v2-vl:free` |
-| `GEMINI_API_KEY` | If gemini | Get from aistudio.google.com |
-| `GOOGLE_OAUTH_CLIENT` | Yes | Path to OAuth2 Desktop credentials JSON |
-| `DATABASE_URL` | No | Defaults to Docker Postgres |
-| `REDIS_URL` | No | Defaults to Docker Redis |
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `OPENROUTER_API_KEY` | Yes | — | [openrouter.ai/keys](https://openrouter.ai/keys) |
+| `OPENROUTER_MODEL` | No | `nvidia/nemotron-nano-12b-v2-vl:free` | Vision model |
+| `WORKER_BACKEND` | No | `celery` | `rust` or `celery` |
+| `RUST_WORKER_URL` | If rust | `http://localhost:9000` | Rust worker base URL |
+| `DATABASE_URL` | No | Docker Postgres | PostgreSQL connection string |
+| `REDIS_URL` | If celery | `redis://localhost:6379/0` | Redis broker |
+| `GOOGLE_OAUTH_CLIENT` | Yes | — | Path to OAuth2 Desktop JSON |
+| `GEMINI_API_KEY` | If gemini | — | [aistudio.google.com](https://aistudio.google.com) |
+| `MODEL_BACKEND` | No | `openrouter` | Python extractor backend |
 
 ---
 
 ## Files NOT in this repo
 
-These files contain secrets and must be set up locally:
-
 | File | Why excluded | How to get |
 |---|---|---|
-| `.env` | Contains API keys | Copy `.env.example`, fill in values |
+| `.env` | API keys | Copy `.env.example`, fill in |
 | `oauth_client.json` | Google OAuth secret | Download from Google Cloud Console |
 | `oauth_token.json` | Live auth token | Auto-generated by `setup_sheets.py` |
 | `sheets_config.json` | Sheet IDs for 15 branches | Auto-generated by `setup_sheets.py` |
 
 ---
 
-## Switching OCR Backend
-
-Change `MODEL_BACKEND` in `.env`:
+## Switching OCR Backend (Python path)
 
 ```env
-MODEL_BACKEND=openrouter   # free, active
+MODEL_BACKEND=openrouter   # free, active (default)
 MODEL_BACKEND=gemini       # better accuracy, needs billing
-MODEL_BACKEND=ollama       # fully local/offline
+MODEL_BACKEND=ollama       # fully local / offline
 ```
 
-No code changes needed — the worker picks up the env var at startup.
+No code changes needed — worker picks up env var at startup.
 
 ---
 
