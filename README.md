@@ -374,6 +374,40 @@ No code changes needed — worker picks up env var at startup.
 
 ---
 
+## Testnet Run Matrix
+
+14 end-to-end test runs documenting the pipeline from first attempt to stable extraction.
+
+**[→ View Live Dashboard](https://claude.ai/code/artifact/efa65fd9-4877-4c17-a176-e52a9a13324f)**  
+**[→ docs/test-matrix.html](docs/test-matrix.html)**
+
+![Testnet Matrix](docs/testnet-matrix-screenshot.png)
+
+### Summary
+
+| Metric | Value |
+|---|---|
+| Total runs | 14 |
+| Successful (done) | 4 |
+| Failed | 9 |
+| Pending/abandoned | 1 |
+| Total lpc_rows inserted | 179 |
+| Real student scores extracted | 14 rows (job 0b5beb38) |
+| Fastest successful run | 38s |
+| Slowest successful run | 168s |
+
+### Bugs fixed during testnet
+
+| # | Bug | Fix |
+|---|---|---|
+| 1 | `No module named 'extractor'` — Celery forked workers miss cwd in `sys.path` | `sys.path.insert(0, _ROOT)` + `PYTHONPATH=$(pwd)` |
+| 2 | Rust serde parse fail — `domains` is object not array | `Vec<DomainData>` → `HashMap<String, DomainScores>` |
+| 3 | `reqwest .text()` fails on 18–19 KB vision responses | Switch to `.bytes()` + `String::from_utf8_lossy()` |
+| 4 | 300s timeout too short for free model (varies 38–300s+) | Raise to 600s, separate `connect_timeout(30s)` |
+
+
+---
+
 ## License
 
 Private — RYSEN Group of Schools / AITS internal tooling.
