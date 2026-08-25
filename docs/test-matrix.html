@@ -1,0 +1,778 @@
+<title>RYSEN OCR — Testnet Run Matrix</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg:       #0d1117;
+    --surface:  #161b22;
+    --border:   #30363d;
+    --pass:     #3fb950;
+    --fail:     #f85149;
+    --warn:     #d29922;
+    --skip:     #484f58;
+    --accent:   #58a6ff;
+    --text:     #e6edf3;
+    --muted:    #8b949e;
+    --mono: 'SF Mono', 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--mono);
+    font-size: 13px;
+    line-height: 1.6;
+    padding: 28px 24px 48px;
+    max-width: 1120px;
+    margin: 0 auto;
+  }
+
+  /* ── Header ───────────────────────────────────── */
+  .header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 16px;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 20px;
+    margin-bottom: 24px;
+  }
+  .header-left .pipeline {
+    font-size: 11px;
+    color: var(--accent);
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    margin-bottom: 4px;
+  }
+  .header-left h1 {
+    font-size: 20px;
+    font-weight: 600;
+    color: var(--text);
+    letter-spacing: -.01em;
+  }
+  .header-left .sub {
+    color: var(--muted);
+    font-size: 11px;
+    margin-top: 4px;
+  }
+  .stats {
+    display: flex;
+    gap: 20px;
+    flex-wrap: wrap;
+  }
+  .stat {
+    text-align: right;
+  }
+  .stat .val {
+    font-size: 22px;
+    font-weight: 700;
+    line-height: 1;
+  }
+  .stat .lbl {
+    font-size: 10px;
+    color: var(--muted);
+    letter-spacing: .06em;
+    text-transform: uppercase;
+    margin-top: 2px;
+  }
+  .stat.pass .val { color: var(--pass); }
+  .stat.fail .val { color: var(--fail); }
+  .stat.warn .val { color: var(--warn); }
+  .stat.blue .val { color: var(--accent); }
+
+  /* ── Section label ───────────────────────────── */
+  .section-label {
+    font-size: 10px;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 10px;
+  }
+
+  /* ── Matrix table ────────────────────────────── */
+  .matrix-wrap {
+    overflow-x: auto;
+    margin-bottom: 32px;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    min-width: 860px;
+  }
+  thead th {
+    background: var(--surface);
+    color: var(--muted);
+    font-size: 10px;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    padding: 8px 10px;
+    text-align: left;
+    border-bottom: 1px solid var(--border);
+    white-space: nowrap;
+  }
+  tbody tr {
+    border-bottom: 1px solid var(--border);
+    transition: background .1s;
+  }
+  tbody tr:hover { background: rgba(255,255,255,.03); }
+  tbody td {
+    padding: 9px 10px;
+    vertical-align: middle;
+    white-space: nowrap;
+    color: var(--text);
+  }
+  .run-num {
+    color: var(--muted);
+    font-size: 11px;
+  }
+  .job-id {
+    color: var(--accent);
+    font-size: 11px;
+  }
+  .branch-chip {
+    display: inline-block;
+    background: rgba(88,166,255,.12);
+    color: var(--accent);
+    border-radius: 3px;
+    padding: 1px 6px;
+    font-size: 11px;
+  }
+  .file-name {
+    color: var(--muted);
+    font-size: 11px;
+    max-width: 180px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  /* phase cells */
+  .ph {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 11px;
+    border-radius: 4px;
+    padding: 2px 7px;
+    font-weight: 500;
+  }
+  .ph.pass  { background: rgba(63,185,80,.15);  color: var(--pass); }
+  .ph.fail  { background: rgba(248,81,73,.15);  color: var(--fail); }
+  .ph.skip  { background: rgba(72,79,88,.2);    color: var(--skip); }
+  .ph.warn  { background: rgba(210,153,34,.15); color: var(--warn); }
+  .ph.pend  { background: rgba(139,148,158,.1); color: var(--muted); }
+  .ph::before { font-size: 9px; }
+  .ph.pass::before  { content: '●'; }
+  .ph.fail::before  { content: '✕'; }
+  .ph.skip::before  { content: '—'; }
+  .ph.warn::before  { content: '⚠'; }
+  .ph.pend::before  { content: '○'; }
+
+  .rows-cell {
+    font-weight: 600;
+    font-size: 12px;
+  }
+  .rows-cell.has { color: var(--pass); }
+  .rows-cell.zero { color: var(--muted); }
+  .rows-cell.none { color: var(--skip); }
+
+  .dur { color: var(--muted); font-size: 11px; }
+  .dur.fast { color: var(--pass); }
+
+  .status-final {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 11px;
+    font-weight: 600;
+    border-radius: 12px;
+    padding: 2px 9px;
+  }
+  .status-final.done   { background: rgba(63,185,80,.18);  color: var(--pass); }
+  .status-final.failed { background: rgba(248,81,73,.18);  color: var(--fail); }
+  .status-final.pend   { background: rgba(139,148,158,.1); color: var(--muted); }
+
+  /* error tooltip */
+  .err-msg {
+    display: inline-block;
+    max-width: 220px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    color: var(--fail);
+    font-size: 11px;
+    cursor: default;
+  }
+  .err-msg:hover { white-space: normal; overflow: visible; background: var(--surface); border: 1px solid var(--border); padding: 4px 6px; border-radius: 4px; position: relative; z-index: 10; }
+
+  /* ── Fix timeline ────────────────────────────── */
+  .timeline {
+    margin-bottom: 32px;
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+  }
+  .tl-item {
+    display: grid;
+    grid-template-columns: 28px 1fr;
+    gap: 0 12px;
+  }
+  .tl-line {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding-top: 4px;
+  }
+  .tl-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    margin-bottom: 0;
+  }
+  .tl-dot.bug  { background: var(--fail); }
+  .tl-dot.fix  { background: var(--pass); }
+  .tl-dot.warn { background: var(--warn); }
+  .tl-connector {
+    flex: 1;
+    width: 1px;
+    background: var(--border);
+    min-height: 20px;
+  }
+  .tl-content {
+    padding: 0 0 20px;
+  }
+  .tl-tag {
+    display: inline-block;
+    font-size: 10px;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+    border-radius: 3px;
+    padding: 1px 6px;
+    margin-bottom: 4px;
+    font-weight: 600;
+  }
+  .tl-tag.bug  { background: rgba(248,81,73,.15);  color: var(--fail); }
+  .tl-tag.fix  { background: rgba(63,185,80,.15);  color: var(--pass); }
+  .tl-tag.note { background: rgba(210,153,34,.15); color: var(--warn); }
+  .tl-title { font-weight: 600; font-size: 12px; margin-bottom: 2px; }
+  .tl-body  { color: var(--muted); font-size: 11px; line-height: 1.5; }
+  .tl-body code {
+    background: rgba(88,166,255,.1);
+    color: var(--accent);
+    border-radius: 3px;
+    padding: 0 4px;
+    font-size: 11px;
+  }
+
+  /* ── Row extraction bar chart ────────────────── */
+  .bars {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-bottom: 32px;
+  }
+  .bar-row {
+    display: grid;
+    grid-template-columns: 200px 1fr 60px;
+    align-items: center;
+    gap: 10px;
+  }
+  .bar-label {
+    font-size: 11px;
+    color: var(--muted);
+    text-align: right;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .bar-track {
+    height: 14px;
+    background: var(--surface);
+    border-radius: 3px;
+    overflow: hidden;
+    border: 1px solid var(--border);
+  }
+  .bar-fill {
+    height: 100%;
+    border-radius: 3px;
+    transition: width .4s ease;
+  }
+  .bar-fill.has-data  { background: var(--pass); }
+  .bar-fill.no-data   { background: rgba(88,166,255,.4); }
+  .bar-fill.filled-c1 {
+    background: linear-gradient(90deg, var(--pass) 0%, rgba(63,185,80,.5) 100%);
+  }
+  .bar-count {
+    font-size: 11px;
+    font-weight: 600;
+    text-align: left;
+  }
+  .bar-count.has  { color: var(--pass); }
+  .bar-count.zero { color: var(--muted); }
+
+  /* ── Worker config ───────────────────────────── */
+  .config-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 12px;
+    margin-bottom: 32px;
+  }
+  .cfg-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 12px 14px;
+  }
+  .cfg-key {
+    font-size: 10px;
+    color: var(--muted);
+    letter-spacing: .06em;
+    text-transform: uppercase;
+    margin-bottom: 4px;
+  }
+  .cfg-val {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--accent);
+  }
+
+  /* ── Footer ──────────────────────────────────── */
+  .footer {
+    border-top: 1px solid var(--border);
+    padding-top: 14px;
+    color: var(--muted);
+    font-size: 10px;
+    display: flex;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+</style>
+
+<!-- ── Header ──────────────────────────────────────────────────── -->
+<div class="header">
+  <div class="header-left">
+    <div class="pipeline">rysen-lpc-ocr · testnet runs</div>
+    <h1>OCR Pipeline — Test Matrix</h1>
+    <div class="sub">worker-rs v0.1.0 · axum :9000 · tokio ×4 · PostgreSQL 15 · OpenRouter vision</div>
+  </div>
+  <div class="stats">
+    <div class="stat blue">
+      <div class="val">14</div>
+      <div class="lbl">Total runs</div>
+    </div>
+    <div class="stat pass">
+      <div class="val">4</div>
+      <div class="lbl">Done</div>
+    </div>
+    <div class="stat fail">
+      <div class="val">9</div>
+      <div class="lbl">Failed</div>
+    </div>
+    <div class="stat warn">
+      <div class="val">179</div>
+      <div class="lbl">Rows saved</div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Rust worker config ──────────────────────────────────────── -->
+<div class="section-label">Worker configuration</div>
+<div class="config-grid">
+  <div class="cfg-card"><div class="cfg-key">HTTP server</div><div class="cfg-val">axum :9000</div></div>
+  <div class="cfg-card"><div class="cfg-key">tokio workers</div><div class="cfg-val">×4 parallel</div></div>
+  <div class="cfg-card"><div class="cfg-key">channel capacity</div><div class="cfg-val">32 (bounded)</div></div>
+  <div class="cfg-card"><div class="cfg-key">LLM semaphore</div><div class="cfg-val">max 5 concurrent</div></div>
+  <div class="cfg-card"><div class="cfg-key">circuit breaker</div><div class="cfg-val">5 fail → OPEN 30s</div></div>
+  <div class="cfg-card"><div class="cfg-key">LLM timeout</div><div class="cfg-val">600s (connect 30s)</div></div>
+  <div class="cfg-card"><div class="cfg-key">model</div><div class="cfg-val">nemotron-nano-12b</div></div>
+  <div class="cfg-card"><div class="cfg-key">PDF → image</div><div class="cfg-val">pdftoppm 150 DPI</div></div>
+</div>
+
+<!-- ── Test matrix ─────────────────────────────────────────────── -->
+<div class="section-label">Run matrix — all jobs</div>
+<div class="matrix-wrap">
+<table>
+  <thead>
+    <tr>
+      <th>#</th>
+      <th>job id</th>
+      <th>branch</th>
+      <th>file</th>
+      <th>ingest</th>
+      <th>pdf→img</th>
+      <th>openrouter</th>
+      <th>parse</th>
+      <th>db insert</th>
+      <th>rows</th>
+      <th>c1 filled</th>
+      <th>dur</th>
+      <th>status</th>
+      <th>error</th>
+    </tr>
+  </thead>
+  <tbody>
+    <!-- 1 -->
+    <tr>
+      <td class="run-num">01</td>
+      <td class="job-id">c6b28e23</td>
+      <td><span class="branch-chip">Jaisalmer</span></td>
+      <td class="file-name">LPC - Early Years.pdf</td>
+      <td><span class="ph pass">queued</span></td>
+      <td><span class="ph skip">n/a</span></td>
+      <td><span class="ph skip">n/a</span></td>
+      <td><span class="ph skip">n/a</span></td>
+      <td><span class="ph skip">n/a</span></td>
+      <td class="rows-cell none">—</td>
+      <td class="rows-cell none">—</td>
+      <td class="dur">—</td>
+      <td><span class="status-final pend">● pending</span></td>
+      <td></td>
+    </tr>
+    <!-- 2 -->
+    <tr>
+      <td class="run-num">02</td>
+      <td class="job-id">6e9e6f02</td>
+      <td><span class="branch-chip">Jaisalmer</span></td>
+      <td class="file-name">LPC - Early Years.pdf</td>
+      <td><span class="ph pass">queued</span></td>
+      <td><span class="ph fail">fail</span></td>
+      <td><span class="ph skip">n/a</span></td>
+      <td><span class="ph skip">n/a</span></td>
+      <td><span class="ph skip">n/a</span></td>
+      <td class="rows-cell none">—</td>
+      <td class="rows-cell none">—</td>
+      <td class="dur">—</td>
+      <td><span class="status-final failed">✕ failed</span></td>
+      <td><span class="err-msg" title="No module named 'extractor'">No module 'extractor'</span></td>
+    </tr>
+    <!-- 3 -->
+    <tr>
+      <td class="run-num">03</td>
+      <td class="job-id">b1cd4bd3</td>
+      <td><span class="branch-chip">Jaisalmer</span></td>
+      <td class="file-name">LPC - Early Years.pdf</td>
+      <td><span class="ph pass">queued</span></td>
+      <td><span class="ph fail">fail</span></td>
+      <td><span class="ph skip">n/a</span></td>
+      <td><span class="ph skip">n/a</span></td>
+      <td><span class="ph skip">n/a</span></td>
+      <td class="rows-cell none">—</td>
+      <td class="rows-cell none">—</td>
+      <td class="dur">—</td>
+      <td><span class="status-final failed">✕ failed</span></td>
+      <td><span class="err-msg">No module 'extractor'</span></td>
+    </tr>
+    <!-- 4 -->
+    <tr>
+      <td class="run-num">04</td>
+      <td class="job-id">58e7ae17</td>
+      <td><span class="branch-chip">Jaisalmer</span></td>
+      <td class="file-name">LPC - Early Years.pdf</td>
+      <td><span class="ph pass">queued</span></td>
+      <td><span class="ph fail">fail</span></td>
+      <td><span class="ph skip">n/a</span></td>
+      <td><span class="ph skip">n/a</span></td>
+      <td><span class="ph skip">n/a</span></td>
+      <td class="rows-cell none">—</td>
+      <td class="rows-cell none">—</td>
+      <td class="dur">—</td>
+      <td><span class="status-final failed">✕ failed</span></td>
+      <td><span class="err-msg">No module 'extractor'</span></td>
+    </tr>
+    <!-- 5 — first success -->
+    <tr style="background: rgba(63,185,80,.04);">
+      <td class="run-num">05</td>
+      <td class="job-id">932e19f4</td>
+      <td><span class="branch-chip">Jaisalmer</span></td>
+      <td class="file-name">LPC - Early Years.pdf</td>
+      <td><span class="ph pass">queued</span></td>
+      <td><span class="ph pass">6 pages</span></td>
+      <td><span class="ph pass">200 OK</span></td>
+      <td><span class="ph pass">parsed</span></td>
+      <td><span class="ph pass">50 rows</span></td>
+      <td class="rows-cell zero">50</td>
+      <td class="rows-cell zero">0</td>
+      <td class="dur fast">128s</td>
+      <td><span class="status-final done">● done</span></td>
+      <td><span style="color:var(--warn); font-size:11px;">blank PDF</span></td>
+    </tr>
+    <!-- 6 — real data -->
+    <tr style="background: rgba(63,185,80,.07);">
+      <td class="run-num">06</td>
+      <td class="job-id">0b5beb38</td>
+      <td><span class="branch-chip">Beawar</span></td>
+      <td class="file-name">LPC (3-5).pdf</td>
+      <td><span class="ph pass">queued</span></td>
+      <td><span class="ph pass">pages</span></td>
+      <td><span class="ph pass">200 OK</span></td>
+      <td><span class="ph pass">parsed</span></td>
+      <td><span class="ph pass">14 rows</span></td>
+      <td class="rows-cell has">14</td>
+      <td class="rows-cell has">14 ✓</td>
+      <td class="dur fast">38s</td>
+      <td><span class="status-final done">● done</span></td>
+      <td><span style="color:var(--pass); font-size:11px;">real scores</span></td>
+    </tr>
+    <!-- 7 -->
+    <tr>
+      <td class="run-num">07</td>
+      <td class="job-id">16ca9c3f</td>
+      <td><span class="branch-chip">Jaisalmer</span></td>
+      <td class="file-name">LPC - Preparatory.pdf</td>
+      <td><span class="ph pass">queued</span></td>
+      <td><span class="ph pass">pages</span></td>
+      <td><span class="ph warn">CB OPEN</span></td>
+      <td><span class="ph skip">n/a</span></td>
+      <td><span class="ph skip">n/a</span></td>
+      <td class="rows-cell none">—</td>
+      <td class="rows-cell none">—</td>
+      <td class="dur">—</td>
+      <td><span class="status-final failed">✕ failed</span></td>
+      <td><span class="err-msg">circuit OPEN — retry in 30s</span></td>
+    </tr>
+    <!-- 8 -->
+    <tr>
+      <td class="run-num">08</td>
+      <td class="job-id">0cc5a164</td>
+      <td><span class="branch-chip">Jaisalmer</span></td>
+      <td class="file-name">LPC - Middle Stage.pdf</td>
+      <td><span class="ph pass">queued</span></td>
+      <td><span class="ph pass">pages</span></td>
+      <td><span class="ph warn">CB OPEN</span></td>
+      <td><span class="ph skip">n/a</span></td>
+      <td><span class="ph skip">n/a</span></td>
+      <td class="rows-cell none">—</td>
+      <td class="rows-cell none">—</td>
+      <td class="dur">—</td>
+      <td><span class="status-final failed">✕ failed</span></td>
+      <td><span class="err-msg">circuit OPEN — retry in 30s</span></td>
+    </tr>
+    <!-- 9 -->
+    <tr>
+      <td class="run-num">09</td>
+      <td class="job-id">32771317</td>
+      <td><span class="branch-chip">Jaisalmer</span></td>
+      <td class="file-name">LPC - Early Years.pdf</td>
+      <td><span class="ph pass">queued</span></td>
+      <td><span class="ph pass">pages</span></td>
+      <td><span class="ph pass">200 OK</span></td>
+      <td><span class="ph fail">parse fail</span></td>
+      <td><span class="ph skip">n/a</span></td>
+      <td class="rows-cell none">—</td>
+      <td class="rows-cell none">—</td>
+      <td class="dur">—</td>
+      <td><span class="status-final failed">✕ failed</span></td>
+      <td><span class="err-msg">Vec vs HashMap mismatch</span></td>
+    </tr>
+    <!-- 10 -->
+    <tr>
+      <td class="run-num">10</td>
+      <td class="job-id">3adafdad</td>
+      <td><span class="branch-chip">Jaisalmer</span></td>
+      <td class="file-name">LPC - Foundational.pdf</td>
+      <td><span class="ph pass">queued</span></td>
+      <td><span class="ph pass">pages</span></td>
+      <td><span class="ph pass">200 OK</span></td>
+      <td><span class="ph fail">parse fail</span></td>
+      <td><span class="ph skip">n/a</span></td>
+      <td class="rows-cell none">—</td>
+      <td class="rows-cell none">—</td>
+      <td class="dur">—</td>
+      <td><span class="status-final failed">✕ failed</span></td>
+      <td><span class="err-msg">Vec vs HashMap mismatch</span></td>
+    </tr>
+    <!-- 11 -->
+    <tr>
+      <td class="run-num">11</td>
+      <td class="job-id">d0baf2ae</td>
+      <td><span class="branch-chip">Jaisalmer</span></td>
+      <td class="file-name">LPC - Early Years.pdf</td>
+      <td><span class="ph pass">queued</span></td>
+      <td><span class="ph pass">pages</span></td>
+      <td><span class="ph fail">body fail</span></td>
+      <td><span class="ph skip">n/a</span></td>
+      <td><span class="ph skip">n/a</span></td>
+      <td class="rows-cell none">—</td>
+      <td class="rows-cell none">—</td>
+      <td class="dur">—</td>
+      <td><span class="status-final failed">✕ failed</span></td>
+      <td><span class="err-msg">body read failed (.text() timeout)</span></td>
+    </tr>
+    <!-- 12 -->
+    <tr style="background: rgba(63,185,80,.04);">
+      <td class="run-num">12</td>
+      <td class="job-id">a9918050</td>
+      <td><span class="branch-chip">Jaisalmer</span></td>
+      <td class="file-name">LPC - Early Years.pdf</td>
+      <td><span class="ph pass">queued</span></td>
+      <td><span class="ph pass">6 pages</span></td>
+      <td><span class="ph pass">200 OK</span></td>
+      <td><span class="ph pass">parsed</span></td>
+      <td><span class="ph pass">50 rows</span></td>
+      <td class="rows-cell zero">50</td>
+      <td class="rows-cell zero">0</td>
+      <td class="dur">153s</td>
+      <td><span class="status-final done">● done</span></td>
+      <td><span style="color:var(--warn); font-size:11px;">blank PDF</span></td>
+    </tr>
+    <!-- 13 -->
+    <tr>
+      <td class="run-num">13</td>
+      <td class="job-id">a7aa6644</td>
+      <td><span class="branch-chip">Jaisalmer</span></td>
+      <td class="file-name">LPC-Early-Years.pdf</td>
+      <td><span class="ph pass">queued</span></td>
+      <td><span class="ph pass">6 pages</span></td>
+      <td><span class="ph fail">timeout</span></td>
+      <td><span class="ph skip">n/a</span></td>
+      <td><span class="ph skip">n/a</span></td>
+      <td class="rows-cell none">—</td>
+      <td class="rows-cell none">—</td>
+      <td class="dur">300s ✕</td>
+      <td><span class="status-final failed">✕ failed</span></td>
+      <td><span class="err-msg">body stream failed (300s limit)</span></td>
+    </tr>
+    <!-- 14 -->
+    <tr style="background: rgba(63,185,80,.04);">
+      <td class="run-num">14</td>
+      <td class="job-id">b1042768</td>
+      <td><span class="branch-chip">Jaisalmer</span></td>
+      <td class="file-name">LPC-Early-Years.pdf</td>
+      <td><span class="ph pass">queued</span></td>
+      <td><span class="ph pass">6 pages</span></td>
+      <td><span class="ph pass">200 OK</span></td>
+      <td><span class="ph pass">parsed</span></td>
+      <td><span class="ph pass">50 rows</span></td>
+      <td class="rows-cell zero">50</td>
+      <td class="rows-cell zero">0</td>
+      <td class="dur fast">168s</td>
+      <td><span class="status-final done">● done</span></td>
+      <td><span style="color:var(--warn); font-size:11px;">blank PDF</span></td>
+    </tr>
+  </tbody>
+</table>
+</div>
+
+<!-- ── Row extraction chart ────────────────────────────────────── -->
+<div class="section-label">lpc_rows extracted per job</div>
+<div class="bars">
+  <div class="bar-row">
+    <div class="bar-label">932e19f4 · Early Years</div>
+    <div class="bar-track"><div class="bar-fill no-data" style="width:100%"></div></div>
+    <div class="bar-count zero">50 rows</div>
+  </div>
+  <div class="bar-row">
+    <div class="bar-label">7b63f0c4 · Early Years</div>
+    <div class="bar-track"><div class="bar-fill no-data" style="width:100%"></div></div>
+    <div class="bar-count zero">50 rows</div>
+  </div>
+  <div class="bar-row">
+    <div class="bar-label">b1042768 · Early Years</div>
+    <div class="bar-track"><div class="bar-fill no-data" style="width:100%"></div></div>
+    <div class="bar-count zero">50 rows</div>
+  </div>
+  <div class="bar-row">
+    <div class="bar-label">348ee50f · Early Years</div>
+    <div class="bar-track"><div class="bar-fill no-data" style="width:30%"></div></div>
+    <div class="bar-count zero">15 rows</div>
+  </div>
+  <div class="bar-row">
+    <div class="bar-label">0b5beb38 · LPC (3-5) ★</div>
+    <div class="bar-track"><div class="bar-fill filled-c1" style="width:28%"></div></div>
+    <div class="bar-count has">14 rows · 14/14 scored</div>
+  </div>
+</div>
+<div style="font-size:11px; color:var(--muted); margin-top:-20px; margin-bottom:32px;">
+  Blue = blank template PDF (struct parsed, scores null) · Green = real student scores extracted · ★ only filled LPC in testnet
+</div>
+
+<!-- ── Fix timeline ────────────────────────────────────────────── -->
+<div class="section-label">Fix timeline</div>
+<div class="timeline">
+
+  <div class="tl-item">
+    <div class="tl-line"><div class="tl-dot bug"></div><div class="tl-connector"></div></div>
+    <div class="tl-content">
+      <div class="tl-tag bug">Bug #1</div>
+      <div class="tl-title">Celery worker: No module named 'extractor'</div>
+      <div class="tl-body">Forked Celery subprocesses don't inherit <code>''</code> from cwd in <code>sys.path</code>. Runs 02–04 all failed at task import.<br>
+      Fix: added <code>sys.path.insert(0, _ROOT)</code> to <code>worker/tasks.py</code> + <code>celery_app.py</code>, launched with <code>PYTHONPATH=$(pwd)</code>.</div>
+    </div>
+  </div>
+
+  <div class="tl-item">
+    <div class="tl-line"><div class="tl-dot fix"></div><div class="tl-connector"></div></div>
+    <div class="tl-content">
+      <div class="tl-tag fix">Fix → Run 05</div>
+      <div class="tl-title">First successful end-to-end extraction</div>
+      <div class="tl-body">50 rows inserted, job marked <code>done</code> in 128s. Blank template PDF so scores null — pipeline confirmed working.</div>
+    </div>
+  </div>
+
+  <div class="tl-item">
+    <div class="tl-line"><div class="tl-dot fix"></div><div class="tl-connector"></div></div>
+    <div class="tl-content">
+      <div class="tl-tag fix">Run 06 · Real data</div>
+      <div class="tl-title">14 rows with actual C1–C4 scores (Beawar, LPC 3-5)</div>
+      <div class="tl-body">First filled student card. All 14 domain rows have non-null scores. Confirms vision model can read handwritten values. 38s — fastest successful run.</div>
+    </div>
+  </div>
+
+  <div class="tl-item">
+    <div class="tl-line"><div class="tl-dot warn"></div><div class="tl-connector"></div></div>
+    <div class="tl-content">
+      <div class="tl-tag note">Runs 07–08 · Circuit breaker</div>
+      <div class="tl-title">CB accumulated failures from load test → OPEN</div>
+      <div class="tl-body">Load test (50 jobs × minimal.pdf) ran against real OpenRouter — failures triggered CB. Subsequent real jobs blocked for 30s per CB cycle.<br>
+      Fix: restart worker (CB resets to CLOSED on fresh start).</div>
+    </div>
+  </div>
+
+  <div class="tl-item">
+    <div class="tl-line"><div class="tl-dot bug"></div><div class="tl-connector"></div></div>
+    <div class="tl-content">
+      <div class="tl-tag bug">Bug #2</div>
+      <div class="tl-title">Rust serde parse fail: domains Vec vs HashMap</div>
+      <div class="tl-body">Model returns <code>domains</code> as a JSON object keyed by domain name: <code>{"Early Literacy": {c1,c2,...}}</code>.<br>
+      Rust struct expected <code>Vec&lt;DomainData&gt;</code> with a <code>name</code> field — schema mismatch. Runs 09–10 got HTTP 200 but <code>serde_json::from_str</code> failed.<br>
+      Fix: changed to <code>HashMap&lt;String, DomainScores&gt;</code>, updated <code>extraction_to_rows</code> to iterate <code>(name, scores)</code> tuples.</div>
+    </div>
+  </div>
+
+  <div class="tl-item">
+    <div class="tl-line"><div class="tl-dot bug"></div><div class="tl-connector"></div></div>
+    <div class="tl-content">
+      <div class="tl-tag bug">Bug #3</div>
+      <div class="tl-title">reqwest .text() failed on large responses</div>
+      <div class="tl-body"><code>.text().await</code> returned Err on 18–19 KB vision responses (encoding/stream issue).<br>
+      Fix: switched to <code>.bytes().await</code> + <code>String::from_utf8_lossy()</code>. Added <code>tracing::debug!(body_len)</code> for visibility.</div>
+    </div>
+  </div>
+
+  <div class="tl-item">
+    <div class="tl-line"><div class="tl-dot bug"></div><div class="tl-connector"></div></div>
+    <div class="tl-content">
+      <div class="tl-tag bug">Bug #4</div>
+      <div class="tl-title">300s reqwest timeout too short for free model</div>
+      <div class="tl-body">Run 13 hit exactly 300s → timeout killed response stream. Free-tier model latency varies 128–300s+.<br>
+      Fix: raised <code>.timeout(600s)</code>, split <code>.connect_timeout(30s)</code> separate.</div>
+    </div>
+  </div>
+
+  <div class="tl-item">
+    <div class="tl-line"><div class="tl-dot fix"></div><div class="tl-connector"></div></div>
+    <div class="tl-content">
+      <div class="tl-tag fix">Fix → Run 14 · Pipeline stable</div>
+      <div class="tl-title">All fixes applied — HashMap struct + bytes() + 600s timeout</div>
+      <div class="tl-body">Run 14: <code>status=200 OK body_len=19000</code> → 50 rows inserted → <code>done</code> in 168s. No warnings. CB stays CLOSED. Commit <code>d8dfec7</code> pushed to GitHub.</div>
+    </div>
+  </div>
+
+</div>
+
+<!-- ── Footer ──────────────────────────────────────────────────── -->
+<div class="footer">
+  <span>rysen-lpc-ocr · github.com/Saraswat123/rysen-lpc-ocr · commit d8dfec7</span>
+  <span>testnet date: 2026-08-24 · PostgreSQL lpc_db · 179 total rows in lpc_rows</span>
+</div>
